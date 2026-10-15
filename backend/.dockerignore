@@ -1,0 +1,14 @@
+# Keep the build context small and the image free of dev/secret files.
+.venv
+__pycache__
+*.pyc
+.pytest_cache
+.coverage
+coverage.xml
+htmlcov
+tests
+requirements-dev.txt
+setup.cfg
+.env
+Dockerfile
+.dockerignore

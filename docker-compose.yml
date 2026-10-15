@@ -1,0 +1,42 @@
+# Local development stack: PostgreSQL + migrations + API.
+# Usage: docker compose up --build
+services:
+  db:
+    image: postgres:16.15-alpine
+    environment:
+      POSTGRES_USER: shop
+      # Local-only default; real environments get it from a Kubernetes Secret.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-shop}
+      POSTGRES_DB: shop
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shop -d shop"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    # No "ports:" — the database is reachable only inside the compose network.
+
+  # One-shot job: apply migrations, then exit. Same image as the API.
+  migrate:
+    build: ./backend
+    image: shop-api:dev
+    command: ["flask", "--app", "wsgi", "db", "upgrade"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://shop:${POSTGRES_PASSWORD:-shop}@db:5432/shop
+    depends_on:
+      db:
+        condition: service_healthy
+
+  api:
+    image: shop-api:dev
+    environment:
+      DATABASE_URL: postgresql+psycopg://shop:${POSTGRES_PASSWORD:-shop}@db:5432/shop
+    ports:
+      - "${API_PORT:-8000}:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  db-data:
