@@ -28,6 +28,9 @@ class ProductList(Resource):
 
 
 class ProductDetail(Resource):
+    def get(self, product_id):
+        return get_product_or_404(product_id).to_dict(), 200
+
     def put(self, product_id):
         product = get_product_or_404(product_id)
         fields, errors = parse_product(json_body(), partial=True)

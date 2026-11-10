@@ -1,5 +1,5 @@
 # ---- Stage 1: build — install dependencies into a virtualenv ----
-FROM python:3.13.16-slim-trixie AS builder
+FROM python:3.14.8-slim-trixie AS builder
 
 ENV PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
@@ -14,7 +14,7 @@ RUN pip install -r requirements.txt
 
 
 # ---- Stage 2: runtime — only the virtualenv and app code ----
-FROM python:3.13.16-slim-trixie AS runtime
+FROM python:3.14.8-slim-trixie AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -25,9 +25,10 @@ RUN useradd --system --uid 10001 --no-create-home app
 
 WORKDIR /app
 COPY --from=builder /opt/venv /opt/venv
-COPY --chown=10001:10001 app ./app
-COPY --chown=10001:10001 migrations ./migrations
-COPY --chown=10001:10001 wsgi.py .
+# Code stays owned by root: the app user can read it but not modify it.
+COPY app ./app
+COPY migrations ./migrations
+COPY wsgi.py .
 
 USER 10001
 EXPOSE 8000

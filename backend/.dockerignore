@@ -1,7 +1,9 @@
 # Keep the build context small and the image free of dev/secret files.
+# Patterns match only at the top level unless prefixed with **/
 .venv
-__pycache__
-*.pyc
+**/__pycache__
+**/*.pyc
+**/.env
 .pytest_cache
 .coverage
 coverage.xml
@@ -9,6 +11,5 @@ htmlcov
 tests
 requirements-dev.txt
 setup.cfg
-.env
 Dockerfile
 .dockerignore
