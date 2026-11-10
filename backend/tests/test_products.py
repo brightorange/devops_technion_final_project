@@ -42,6 +42,18 @@ def test_create_product_requires_json_object(client):
     assert response.status_code == 400
 
 
+def test_get_product(client, make_product):
+    product = make_product()
+    response = client.get(f"/api/products/{product['id']}")
+    assert response.status_code == 200
+    assert response.get_json() == product
+
+
+def test_get_missing_product(client):
+    response = client.get("/api/products/99")
+    assert response.status_code == 404
+
+
 def test_update_product(client, make_product):
     product = make_product()
     response = client.put(f"/api/products/{product['id']}", json={"price": 899, "stock": 10})
