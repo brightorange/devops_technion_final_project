@@ -75,7 +75,12 @@ sonarqube:
     # Coverage records the path inside the build container, which does not
     # exist on the host. Rewrite it to the repository-relative path so Sonar
     # can match the report to the source files.
-    - sed -i'' 's|<source>/src/app</source>|<source>backend/app</source>|' reports/coverage.xml
+    # Written to a temp file rather than with `sed -i`, whose syntax differs
+    # between BSD (macOS runners) and GNU sed.
+    - |
+      sed 's|<source>/src/app</source>|<source>backend/app</source>|' \
+        reports/coverage.xml > reports/coverage.fixed.xml
+      mv reports/coverage.fixed.xml reports/coverage.xml
     # qualitygate.wait makes the scanner poll the server and exit non-zero if
     # the gate fails. Without it the job only uploads a report and is green
     # whatever the result, which is a gate in name only.
