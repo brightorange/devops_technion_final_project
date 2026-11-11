@@ -1,0 +1,96 @@
+# CI for the application repo: lint, test, scan, build, publish.
+# Deployment lives in the infra repo's pipeline, which owns the Helm chart.
+#
+# Jobs run on a self-managed shell runner on the developer's machine. GitLab's
+# shared runners are in their cloud and have no route to the local Minikube,
+# whose API server is on 127.0.0.1.
+
+stages:
+  - lint
+  - test
+  - scan          # secrets — before anything is built
+  - build
+  - image-scan    # CVEs — needs the built image to exist
+  - publish
+
+variables:
+  IMAGE: shop-api
+  # GitLab clones shallow by default. GitLeaks scans history, and a credential
+  # that was committed and later deleted is still leaked, so fetch everything.
+  GIT_DEPTH: "0"
+
+default:
+  tags:
+    - local
+  interruptible: true
+
+# The test image carries dev dependencies and the test sources. Docker layer
+# caching makes the repeat builds in later jobs near-instant, and building it
+# per job keeps the jobs independent of each other's leftovers.
+.build_test_image: &build_test_image
+  - docker build --target test -t "$IMAGE:test-$CI_COMMIT_SHORT_SHA" backend
+
+lint:
+  stage: lint
+  script:
+    - *build_test_image
+    - docker run --rm "$IMAGE:test-$CI_COMMIT_SHORT_SHA" flake8
+
+test:
+  stage: test
+  script:
+    - *build_test_image
+    - mkdir -p reports
+    # Tests run inside the image so they execute against the exact Python and
+    # dependency set that ships.
+    - |
+      docker run --rm -v "$CI_PROJECT_DIR/reports:/out" "$IMAGE:test-$CI_COMMIT_SHORT_SHA" \
+        pytest -q --junitxml=/out/report.xml --cov-report=xml:/out/coverage.xml
+  coverage: '/TOTAL.*?(\d+\%)$/'
+  artifacts:
+    when: always
+    reports:
+      junit: reports/report.xml
+      coverage_report:
+        coverage_format: cobertura
+        path: reports/coverage.xml
+
+# ---- Security gate 1: secrets ----
+secret-scan:
+  stage: scan
+  script:
+    - |
+      gitleaks detect --source . --redact --no-banner \
+        --report-format junit --report-path gitleaks-report.xml
+  artifacts:
+    when: always
+    reports:
+      junit: gitleaks-report.xml
+
+build-image:
+  stage: build
+  script:
+    - docker build --target runtime -t "$IMAGE:$CI_COMMIT_SHORT_SHA" backend
+
+# ---- Security gate 2: image vulnerabilities ----
+# --ignore-unfixed is deliberate. The base image carries ~50 HIGH/CRITICAL CVEs
+# with no upstream patch available; failing on those would make the gate
+# unsatisfiable, and an unsatisfiable gate gets switched off. The build fails on
+# what can actually be remediated.
+image-scan:
+  stage: image-scan
+  script:
+    - |
+      trivy image --scanners vuln --severity HIGH,CRITICAL \
+        --ignore-unfixed --exit-code 1 --no-progress "$IMAGE:$CI_COMMIT_SHORT_SHA"
+
+# Minikube keeps its own image store, so a locally built image has to be
+# side-loaded before the cluster can run it. Replaced by a registry push once
+# the cloud environment exists.
+publish-to-minikube:
+  stage: publish
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  script:
+    - docker tag "$IMAGE:$CI_COMMIT_SHORT_SHA" "$IMAGE:dev"
+    - minikube image load "$IMAGE:dev"
