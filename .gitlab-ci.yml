@@ -25,21 +25,22 @@ default:
   interruptible: true
 
 # The test image carries dev dependencies and the test sources. Docker layer
-# caching makes the repeat builds in later jobs near-instant, and building it
+# caching makes the repeat build in the second job near-instant, and building it
 # per job keeps the jobs independent of each other's leftovers.
-.build_test_image: &build_test_image
-  - docker build --target test -t "$IMAGE:test-$CI_COMMIT_SHORT_SHA" backend
+.uses_test_image:
+  before_script:
+    - docker build --target test -t "$IMAGE:test-$CI_COMMIT_SHORT_SHA" backend
 
 lint:
+  extends: .uses_test_image
   stage: lint
   script:
-    - *build_test_image
     - docker run --rm "$IMAGE:test-$CI_COMMIT_SHORT_SHA" flake8
 
 test:
+  extends: .uses_test_image
   stage: test
   script:
-    - *build_test_image
     - mkdir -p reports
     # Tests run inside the image so they execute against the exact Python and
     # dependency set that ships.
