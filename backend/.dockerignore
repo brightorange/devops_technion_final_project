@@ -8,8 +8,9 @@
 .coverage
 coverage.xml
 htmlcov
-tests
-requirements-dev.txt
-setup.cfg
 Dockerfile
 .dockerignore
+
+# tests/, requirements-dev.txt and setup.cfg stay in the context: the `test`
+# build target needs them. They never reach the runtime image, which copies
+# only app/, migrations/ and wsgi.py.
