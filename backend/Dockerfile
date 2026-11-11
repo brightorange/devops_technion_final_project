@@ -70,7 +70,7 @@ COPY --from=prune /opt/venv /opt/venv
 # Code stays owned by root: the app user can read it but not modify it.
 COPY app ./app
 COPY migrations ./migrations
-COPY wsgi.py .
+COPY wsgi.py gunicorn.conf.py ./
 
 USER 10001
 EXPOSE 8000
@@ -79,4 +79,6 @@ EXPOSE 8000
 HEALTHCHECK --interval=10s --timeout=3s --start-period=10s --retries=3 \
     CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/live')"]
 
-CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "2", "--access-logfile", "-", "wsgi:app"]
+# Bind, workers and logging now live in gunicorn.conf.py, alongside the
+# Prometheus multiprocess hooks that need them.
+CMD ["gunicorn", "-c", "gunicorn.conf.py", "wsgi:app"]
