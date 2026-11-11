@@ -3,11 +3,14 @@ from flask_restful import Api
 
 from .config import Config
 from .extensions import db, migrate
+from .metrics import init_metrics
 
 
 def create_app(config_class=Config):
     app = Flask(__name__)
     app.config.from_object(config_class)
+
+    init_metrics(app)
 
     db.init_app(app)
     migrate.init_app(app, db)

@@ -3,6 +3,7 @@ from decimal import Decimal
 from flask_restful import Resource, abort
 
 from ..extensions import db
+from ..metrics import ITEMS_SOLD, ORDER_VALUE, ORDERS_CREATED, ORDERS_REJECTED
 from ..models import CartItem, Order, OrderItem, Product
 from ..validation import fail_if, json_body, positive_int
 
@@ -16,6 +17,7 @@ class OrderList(Resource):
 
         cart = db.session.scalars(db.select(CartItem).filter_by(user_id=user_id)).all()
         if not cart:
+            ORDERS_REJECTED.labels(reason="empty_cart").inc()
             abort(400, message=f"Cart of user {user_id} is empty")
 
         # Lock the product rows (SELECT ... FOR UPDATE) so two simultaneous
@@ -33,6 +35,7 @@ class OrderList(Resource):
             product = products[item.product_id]
             if item.quantity > product.stock:
                 db.session.rollback()
+                ORDERS_REJECTED.labels(reason="out_of_stock").inc()
                 abort(409, message=f"Only {product.stock} of product {product.id} in stock")
             product.stock -= item.quantity
             order.items.append(
@@ -44,6 +47,13 @@ class OrderList(Resource):
         # Stock change, new order and emptied cart are committed together or not at all.
         db.session.add(order)
         db.session.commit()
+
+        # Counted after the commit, so the metrics only ever reflect orders
+        # that actually exist.
+        ORDERS_CREATED.inc()
+        ORDER_VALUE.observe(float(order.total))
+        ITEMS_SOLD.inc(sum(item.quantity for item in order.items))
+
         return order.to_dict(), 201
 
 
