@@ -41,36 +41,54 @@ def to_price(value):
     return None
 
 
+def _check_name(value):
+    if not isinstance(value, str) or not value.strip() or len(value.strip()) > 120:
+        return None, "must be a non-empty string of at most 120 characters"
+    return value.strip(), None
+
+
+def _check_description(value):
+    if not isinstance(value, str):
+        return None, "must be a string"
+    return value, None
+
+
+def _check_price(value):
+    price = to_price(value)
+    if price is None:
+        return None, "must be a number greater than 0 with at most 2 decimals"
+    return price, None
+
+
+def _check_stock(value):
+    if not is_int(value) or value < 0:
+        return None, "must be a non-negative integer"
+    return value, None
+
+
+# field name -> (validator, required when creating)
+PRODUCT_FIELDS = {
+    "name": (_check_name, True),
+    "description": (_check_description, False),
+    "price": (_check_price, True),
+    "stock": (_check_stock, False),
+}
+
+
 def parse_product(data, partial=False):
     """Validate product fields. partial=True (used by PUT) allows missing fields."""
     fields, errors = {}, {}
 
-    if "name" in data or not partial:
-        name = data.get("name")
-        if not isinstance(name, str) or not name.strip() or len(name.strip()) > 120:
-            errors["name"] = "must be a non-empty string of at most 120 characters"
+    for key, (check, required) in PRODUCT_FIELDS.items():
+        # A field is validated when it is present, and additionally when it is
+        # required and this is a create rather than a partial update.
+        if key not in data and (partial or not required):
+            continue
+        value, error = check(data.get(key))
+        if error:
+            errors[key] = error
         else:
-            fields["name"] = name.strip()
-
-    if "description" in data:
-        if not isinstance(data["description"], str):
-            errors["description"] = "must be a string"
-        else:
-            fields["description"] = data["description"]
-
-    if "price" in data or not partial:
-        price = to_price(data.get("price"))
-        if price is None:
-            errors["price"] = "must be a number greater than 0 with at most 2 decimals"
-        else:
-            fields["price"] = price
-
-    if "stock" in data:
-        stock = data["stock"]
-        if not is_int(stock) or stock < 0:
-            errors["stock"] = "must be a non-negative integer"
-        else:
-            fields["stock"] = stock
+            fields[key] = value
 
     if partial and not fields and not errors:
         errors["body"] = "no updatable fields provided"

@@ -15,6 +15,9 @@ stages:
 
 variables:
   IMAGE: shop-api
+  # SonarQube runs on the same host as the runner. SONAR_TOKEN is a masked
+  # CI/CD variable, set in the project's settings rather than committed.
+  SONAR_HOST_URL: "http://localhost:9000"
   # GitLab clones shallow by default. GitLeaks scans history, and a credential
   # that was committed and later deleted is still leaked, so fetch everything.
   GIT_DEPTH: "0"
@@ -50,11 +53,42 @@ pytest:
   coverage: '/TOTAL.*?(\d+\%)$/'
   artifacts:
     when: always
+    # The raw file is kept as well as the parsed report, because the SonarQube
+    # job in the next stage consumes it.
+    paths:
+      - reports/coverage.xml
     reports:
       junit: reports/report.xml
       coverage_report:
         coverage_format: cobertura
         path: reports/coverage.xml
+
+# ---- Static analysis (SAST) ----
+# SonarQube runs as build infrastructure on the same machine as the runner, not
+# in the application cluster. SONAR_TOKEN is a masked CI/CD variable.
+sonarqube:
+  stage: scan
+  needs:
+    - job: pytest
+      artifacts: true
+  script:
+    # Coverage records the path inside the build container, which does not
+    # exist on the host. Rewrite it to the repository-relative path so Sonar
+    # can match the report to the source files.
+    # Written to a temp file rather than with `sed -i`, whose syntax differs
+    # between BSD (macOS runners) and GNU sed.
+    - |
+      sed 's|<source>/src/app</source>|<source>backend/app</source>|' \
+        reports/coverage.xml > reports/coverage.fixed.xml
+      mv reports/coverage.fixed.xml reports/coverage.xml
+    # qualitygate.wait makes the scanner poll the server and exit non-zero if
+    # the gate fails. Without it the job only uploads a report and is green
+    # whatever the result, which is a gate in name only.
+    - |
+      sonar-scanner \
+        -Dsonar.host.url="$SONAR_HOST_URL" \
+        -Dsonar.token="$SONAR_TOKEN" \
+        -Dsonar.qualitygate.wait=true
 
 # ---- Security gate 1: secrets ----
 gitleaks:
