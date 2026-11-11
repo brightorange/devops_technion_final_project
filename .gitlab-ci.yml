@@ -31,13 +31,13 @@ default:
   before_script:
     - docker build --target test -t "$IMAGE:test-$CI_COMMIT_SHORT_SHA" backend
 
-lint:
+flake8:
   extends: .uses_test_image
   stage: lint
   script:
     - docker run --rm "$IMAGE:test-$CI_COMMIT_SHORT_SHA" flake8
 
-test:
+pytest:
   extends: .uses_test_image
   stage: test
   script:
@@ -57,7 +57,7 @@ test:
         path: reports/coverage.xml
 
 # ---- Security gate 1: secrets ----
-secret-scan:
+gitleaks:
   stage: scan
   script:
     - |
@@ -68,7 +68,7 @@ secret-scan:
     reports:
       junit: gitleaks-report.xml
 
-build-image:
+docker-build:
   stage: build
   script:
     - docker build --target runtime -t "$IMAGE:$CI_COMMIT_SHORT_SHA" backend
@@ -78,7 +78,7 @@ build-image:
 # with no upstream patch available; failing on those would make the gate
 # unsatisfiable, and an unsatisfiable gate gets switched off. The build fails on
 # what can actually be remediated.
-image-scan:
+trivy:
   stage: image-scan
   script:
     - |
@@ -88,7 +88,7 @@ image-scan:
 # Minikube keeps its own image store, so a locally built image has to be
 # side-loaded before the cluster can run it. Replaced by a registry push once
 # the cloud environment exists.
-publish-to-minikube:
+minikube-load:
   stage: publish
   rules:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
