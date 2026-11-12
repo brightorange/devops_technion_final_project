@@ -219,3 +219,25 @@ compliance-report:
       - reports/trivy.json
       - reports/grype.json
     expire_in: 1 year
+
+# ---- Publish the compliance report ----
+# GitLab will not render a Markdown or JSON job artifact in the browser, only
+# offer it for download. Pages serves the same files as a readable page, which
+# is what makes the evidence usable rather than merely archived.
+pages:
+  stage: report
+  needs:
+    - job: compliance-report
+      artifacts: true
+  script:
+    - mkdir -p public
+    - cp reports/index.html reports/compliance.md public/
+    - cp reports/sbom.txt reports/sbom.cdx.json reports/sbom.spdx.json public/
+    - cp reports/trivy.json reports/grype.json public/
+  artifacts:
+    paths:
+      - public
+  rules:
+    # Only the default branch publishes: a site built from a feature branch
+    # would overwrite the published one with unreviewed content.
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
