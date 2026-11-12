@@ -212,8 +212,12 @@ compliance-report:
     - python3 .ci/compliance-report.py
   artifacts:
     when: always
+    # Everything the Pages job serves has to be published here, including the
+    # SBOM files this job only passes through.
     paths:
       - reports/compliance.md
+      - reports/index.html
+      - reports/sbom.txt
       - reports/sbom.cdx.json
       - reports/sbom.spdx.json
       - reports/trivy.json
