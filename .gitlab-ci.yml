@@ -5,6 +5,11 @@
 # shared runners are in their cloud and have no route to the local Minikube,
 # whose API server is on 127.0.0.1.
 
+# Scanners record findings but do not stop the pipeline: every check runs and
+# the compliance report is always produced, so a build that fails one gate
+# still leaves complete evidence of what was wrong. A single `security-gate`
+# job then decides whether the result is deployable, and `publish` depends on
+# it. Findings block the deploy, not the evidence.
 stages:
   - lint
   - test
@@ -12,6 +17,7 @@ stages:
   - build
   - image-scan    # SBOM and CVEs — need the built image to exist
   - report        # collect every finding into one durable artifact
+  - gate          # the single place that decides "deployable or not"
   - publish
 
 variables:
@@ -68,6 +74,8 @@ pytest:
 # SonarQube runs as build infrastructure on the same machine as the runner, not
 # in the application cluster. SONAR_TOKEN is a masked CI/CD variable.
 sonarqube:
+  # Records findings; blocking is decided by security-gate.
+  allow_failure: true
   stage: scan
   needs:
     - job: pytest
@@ -108,6 +116,8 @@ sonarqube:
 
 # ---- Security gate 1: secrets ----
 gitleaks:
+  # Records findings; blocking is decided by security-gate.
+  allow_failure: true
   stage: scan
   script:
     - mkdir -p reports
@@ -139,6 +149,8 @@ docker-build:
 # unsatisfiable, and an unsatisfiable gate gets switched off. The build fails on
 # what can actually be remediated.
 trivy:
+  # Records findings; blocking is decided by security-gate.
+  allow_failure: true
   stage: image-scan
   script:
     - mkdir -p reports
@@ -195,6 +207,8 @@ sbom:
 #
 # Policy and justified ignores live in .grype.yaml.
 grype:
+  # Records findings; blocking is decided by security-gate.
+  allow_failure: true
   stage: image-scan
   needs:
     - job: sbom
@@ -213,6 +227,10 @@ grype:
 # the cloud environment exists.
 minikube-load:
   stage: publish
+  # Will not run if security-gate failed: findings block the deploy.
+  needs:
+    - job: docker-build
+    - job: security-gate
   rules:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
   script:
@@ -252,6 +270,19 @@ compliance-report:
       - reports/trivy.json
       - reports/grype.json
     expire_in: 1 year
+
+# ---- The deploy gate ----
+# The single place that decides whether a build is deployable. It re-reads the
+# same reports the compliance page publishes, so the gate and the evidence can
+# never disagree. Scanners above are allow_failure precisely so that this
+# decision happens once, here, after everything has been collected.
+security-gate:
+  stage: gate
+  needs:
+    - job: compliance-report
+      artifacts: true
+  script:
+    - python3 .ci/compliance-report.py --gate
 
 # ---- Publish the compliance report ----
 # GitLab will not render a Markdown or JSON job artifact in the browser, only

@@ -375,14 +375,53 @@ def render_html(data):
     return "".join(parts)
 
 
+def blockers(data):
+    """Findings that should stop a deploy, as (tool, count) pairs."""
+    found = []
+    for tool, key in (
+        ("GitLeaks", "gitleaks"),
+        ("SonarQube", "sonarqube"),
+        ("Trivy", "trivy"),
+        ("Grype", "grype"),
+    ):
+        count = data[key][0]
+        if count:
+            found.append((tool, count))
+    return found
+
+
 def main():
+    gate = "--gate" in sys.argv
     REPORTS.mkdir(exist_ok=True)
     data = collect()
+
+    if gate:
+        # Reads the reports the earlier stage already produced and decides
+        # whether the result is deployable. Deliberately the only place that
+        # decision is made, so it can never disagree with the published report.
+        if data["missing"]:
+            print(
+                f"BLOCKED: missing scanner output: {', '.join(data['missing'])}",
+                file=sys.stderr,
+            )
+            return 1
+        found = blockers(data)
+        if found:
+            print("BLOCKED — findings that must be resolved before deploy:\n")
+            for tool, count in found:
+                print(f"  {tool}: {count}")
+            print(f"\nFull report: {data['pipeline_url'] or 'see artifacts'}")
+            return 1
+        print("All gates clear — deployable.")
+        return 0
 
     (REPORTS / "compliance.md").write_text(render_markdown(data))
     (REPORTS / "index.html").write_text(render_html(data))
     print(render_markdown(data))
 
+    # The report is evidence and is always produced. A scanner that produced
+    # nothing at all is different from one that found problems: it means the
+    # evidence is incomplete, so that still fails here.
     if data["missing"]:
         print(
             f"\nERROR: missing scanner output: {', '.join(data['missing'])}",
