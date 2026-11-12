@@ -94,8 +94,11 @@ sonarqube:
     # after_script so the summary is captured even when the gate fails, which
     # is exactly when someone wants to read it.
     - mkdir -p reports
+    # Credentials go in via stdin, not `-u` on the command line: anything in
+    # argv is readable by any other process on the host through `ps`. GitLeaks
+    # flags the `-u` form for exactly that reason.
     - |
-      curl -sf -u "$SONAR_TOKEN:" \
+      printf 'user = "%s:"\n' "$SONAR_TOKEN" | curl -sf --config - \
         "$SONAR_HOST_URL/api/qualitygates/project_status?projectKey=shop-api" \
         -o reports/sonarqube.json || echo '{}' > reports/sonarqube.json
   artifacts:
