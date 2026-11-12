@@ -34,6 +34,34 @@ def load(name):
         return None
 
 
+def job_urls():
+    """Map job name to its URL, so every gate links to the run that produced it.
+
+    A job cannot know another job's id, so this asks the API for the current
+    pipeline's jobs. Any failure falls back to linking the pipeline itself,
+    which is one click further but never wrong.
+    """
+    api = os.environ.get("CI_API_V4_URL")
+    project = os.environ.get("CI_PROJECT_ID")
+    pipeline = os.environ.get("CI_PIPELINE_ID")
+    token = os.environ.get("CI_JOB_TOKEN")
+    if not all((api, project, pipeline, token)):
+        return {}
+
+    import urllib.error
+    import urllib.request
+
+    url = f"{api}/projects/{project}/pipelines/{pipeline}/jobs?per_page=100"
+    request = urllib.request.Request(url, headers={"JOB-TOKEN": token})
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            jobs = json.load(response)
+    except (urllib.error.URLError, json.JSONDecodeError, OSError) as exc:
+        print(f"note: could not resolve job links ({exc})", file=sys.stderr)
+        return {}
+    return {j["name"]: j["web_url"] for j in jobs if j.get("web_url")}
+
+
 def collect():
     """Read every scanner report into one structure."""
     data = {
@@ -42,6 +70,12 @@ def collect():
         "pipeline": os.environ.get("CI_PIPELINE_ID", "-"),
         "pipeline_url": os.environ.get("CI_PIPELINE_URL", ""),
         "image": os.environ.get("IMAGE", "shop-api"),
+        "jobs": job_urls(),
+        "infra_pipelines": os.environ.get(
+            "INFRA_PIPELINES_URL",
+            "https://gitlab.com/inga-group2/"
+            "devops_technion_final_project_infra/-/pipelines",
+        ),
         "missing": [],
     }
 
@@ -116,17 +150,30 @@ LICENCE_NOTE = (
 
 
 def gate_rows(data):
+    """One row per gate: (gate, tool, result, link, note).
+
+    `link` may be None, in which case the result renders as plain text.
+    """
     trivy_count, trivy_note = data["trivy"]
     grype_count, grype_note = data["grype"]
-    fmt = lambda v: "n/a" if v is None else str(v)  # noqa: E731
+    jobs = data["jobs"]
+    # Without the API the pipeline page is still one click from every job.
+    fallback = data["pipeline_url"] or None
+
+    def job(name):
+        return jobs.get(name, fallback)
+
+    def fmt(value):
+        return "n/a" if value is None else str(value)
+
     return [
-        ("Secrets", "GitLeaks", "see job",
+        ("Secrets", "GitLeaks", "see job", job("gitleaks"),
          "full git history, not just the checkout"),
-        ("SAST", "SonarQube", "see job",
+        ("SAST", "SonarQube", "see job", job("sonarqube"),
          "quality gate enforced with qualitygate.wait"),
-        ("Image CVEs", "Trivy", fmt(trivy_count), trivy_note),
-        ("Image CVEs", "Grype", fmt(grype_count), grype_note),
-        ("IaC", "Checkov", "infra repo",
+        ("Image CVEs", "Trivy", fmt(trivy_count), job("trivy"), trivy_note),
+        ("Image CVEs", "Grype", fmt(grype_count), job("grype"), grype_note),
+        ("IaC", "Checkov", "infra repo", data["infra_pipelines"],
          "suppressions justified in .checkov.yaml"),
     ]
 
@@ -145,8 +192,9 @@ def render_markdown(data):
         "| Gate | Tool | Blocking findings | Notes |",
         "|---|---|---|---|",
     ]
-    for gate, tool, count, note in gate_rows(data):
-        out.append(f"| {gate} | {tool} | {count} | {note} |")
+    for gate, tool, count, link, note in gate_rows(data):
+        cell = f"[{count}]({link})" if link else count
+        out.append(f"| {gate} | {tool} | {cell} | {note} |")
     out += ["", GATES_INTRO, "", "## Software Bill of Materials", ""]
 
     sbom = data["sbom"]
@@ -224,13 +272,16 @@ def render_html(data):
     sbom = data["sbom"]
 
     rows = []
-    for gate, tool, count, note in gate_rows(data):
+    for gate, tool, count, link, note in gate_rows(data):
         cls = ""
         if count.isdigit():
             cls = ' class="ok"' if count == "0" else ' class="bad"'
+        cell = f"<span{cls}>{e(count)}</span>"
+        if link:
+            cell = f'<a href="{e(link)}">{cell}</a>'
         rows.append(
             f"<tr><td>{e(gate)}</td><td>{e(tool)}</td>"
-            f"<td class='n'><span{cls}>{e(count)}</span></td>"
+            f"<td class='n'>{cell}</td>"
             f"<td class='note'>{e(note)}</td></tr>"
         )
 
