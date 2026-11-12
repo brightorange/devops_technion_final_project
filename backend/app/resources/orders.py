@@ -1,5 +1,6 @@
 from decimal import Decimal
 
+from flask import request
 from flask_restful import Resource, abort
 
 from ..extensions import db
@@ -9,6 +10,14 @@ from ..validation import fail_if, json_body, positive_int
 
 
 class OrderList(Resource):
+    def get(self):
+        """List orders, newest first, optionally for one user."""
+        query = db.select(Order).order_by(Order.id.desc())
+        user_id = request.args.get("user_id", type=int)
+        if user_id is not None:
+            query = query.filter_by(user_id=user_id)
+        return [order.to_dict() for order in db.session.scalars(query)], 200
+
     def post(self):
         data = json_body()
         errors = {}

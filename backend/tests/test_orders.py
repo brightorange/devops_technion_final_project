@@ -58,3 +58,28 @@ def test_order_validation(client):
 
 def test_get_missing_order(client):
     assert client.get("/api/orders/42").status_code == 404
+
+
+def test_list_orders_is_empty_initially(client):
+    response = client.get("/api/orders")
+    assert response.status_code == 200
+    assert response.get_json() == []
+
+
+def test_list_orders_newest_first(client, make_product, add_to_cart):
+    product = make_product(stock=10)
+    for _ in range(2):
+        add_to_cart(product_id=product["id"], quantity=1)
+        client.post("/api/orders", json={"user_id": 1})
+
+    orders = client.get("/api/orders").get_json()
+    assert [o["id"] for o in orders] == [2, 1]
+
+
+def test_list_orders_filtered_by_user(client, make_product, add_to_cart):
+    product = make_product(stock=10)
+    add_to_cart(product_id=product["id"], quantity=1, user_id=7)
+    client.post("/api/orders", json={"user_id": 7})
+
+    assert len(client.get("/api/orders?user_id=7").get_json()) == 1
+    assert client.get("/api/orders?user_id=8").get_json() == []
