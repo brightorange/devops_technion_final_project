@@ -79,6 +79,34 @@ def collect():
         "missing": [],
     }
 
+    leaks = load("gitleaks.json")
+    if leaks is None:
+        data["missing"].append("gitleaks")
+        data["gitleaks"] = (None, "report not produced")
+    else:
+        # GitLeaks writes a JSON array of findings; empty means clean.
+        count = len(leaks) if isinstance(leaks, list) else 0
+        data["gitleaks"] = (
+            count,
+            "full git history, not just the checkout",
+        )
+
+    sonar = load("sonarqube.json")
+    status = ((sonar or {}).get("projectStatus") or {})
+    if not status:
+        data["missing"].append("sonarqube")
+        data["sonarqube"] = (None, "report not produced")
+    else:
+        failed = [c for c in status.get("conditions", []) if c.get("status") != "OK"]
+        detail = ", ".join(
+            f"{c['metricKey']} {c.get('actualValue')}" for c in failed
+        )
+        data["sonarqube"] = (
+            len(failed),
+            f"quality gate {status.get('status', '?')}"
+            + (f" — {detail}" if detail else ""),
+        )
+
     trivy = load("trivy.json")
     if trivy is None:
         data["missing"].append("trivy")
@@ -154,6 +182,8 @@ def gate_rows(data):
 
     `link` may be None, in which case the result renders as plain text.
     """
+    leak_count, leak_note = data["gitleaks"]
+    sonar_count, sonar_note = data["sonarqube"]
     trivy_count, trivy_note = data["trivy"]
     grype_count, grype_note = data["grype"]
     jobs = data["jobs"]
@@ -167,10 +197,8 @@ def gate_rows(data):
         return "n/a" if value is None else str(value)
 
     return [
-        ("Secrets", "GitLeaks", "see job", job("gitleaks"),
-         "full git history, not just the checkout"),
-        ("SAST", "SonarQube", "see job", job("sonarqube"),
-         "quality gate enforced with qualitygate.wait"),
+        ("Secrets", "GitLeaks", fmt(leak_count), job("gitleaks"), leak_note),
+        ("SAST", "SonarQube", fmt(sonar_count), job("sonarqube"), sonar_note),
         ("Image CVEs", "Trivy", fmt(trivy_count), job("trivy"), trivy_note),
         ("Image CVEs", "Grype", fmt(grype_count), job("grype"), grype_note),
         ("IaC", "Checkov", "infra repo", data["infra_pipelines"],
@@ -189,7 +217,7 @@ def render_markdown(data):
         "",
         "## Security gates",
         "",
-        "| Gate | Tool | Blocking findings | Notes |",
+        "| Gate | Tool | Findings that fail the build | Notes |",
         "|---|---|---|---|",
     ]
     for gate, tool, count, link, note in gate_rows(data):
@@ -300,7 +328,8 @@ def render_html(data):
         f"<p class=meta>Image <code>{e(data['image'])}:{e(data['sha'])}</code></p>",
         "<h2>Security gates</h2>",
         "<table><thead><tr><th>Gate</th><th>Tool</th>"
-        "<th style='text-align:right'>Blocking</th><th>Notes</th></tr></thead>",
+        "<th style='text-align:right'>Fails build</th>"
+        "<th>Notes</th></tr></thead>",
         f"<tbody>{''.join(rows)}</tbody></table>",
         f"<p class=note>{e(GATES_INTRO)}</p>",
         "<h2>Software Bill of Materials</h2>",

@@ -90,16 +90,38 @@ sonarqube:
         -Dsonar.host.url="$SONAR_HOST_URL" \
         -Dsonar.token="$SONAR_TOKEN" \
         -Dsonar.qualitygate.wait=true
+  after_script:
+    # after_script so the summary is captured even when the gate fails, which
+    # is exactly when someone wants to read it.
+    - mkdir -p reports
+    - |
+      curl -sf -u "$SONAR_TOKEN:" \
+        "$SONAR_HOST_URL/api/qualitygates/project_status?projectKey=shop-api" \
+        -o reports/sonarqube.json || echo '{}' > reports/sonarqube.json
+  artifacts:
+    when: always
+    paths:
+      - reports/sonarqube.json
 
 # ---- Security gate 1: secrets ----
 gitleaks:
   stage: scan
   script:
+    - mkdir -p reports
+    # JSON for the compliance report, JUnit for GitLab's test-results tab.
+    # One --report-format per run, and the scan takes well under a second.
+    # `|| true` on the first so a leak still reaches the second run and the
+    # artifact; the second decides the job.
+    - |
+      gitleaks detect --source . --redact --no-banner \
+        --report-format json --report-path reports/gitleaks.json || true
     - |
       gitleaks detect --source . --redact --no-banner \
         --report-format junit --report-path gitleaks-report.xml
   artifacts:
     when: always
+    paths:
+      - reports/gitleaks.json
     reports:
       junit: gitleaks-report.xml
 
@@ -207,6 +229,10 @@ compliance-report:
     - job: grype
       artifacts: true
     - job: sbom
+      artifacts: true
+    - job: gitleaks
+      artifacts: true
+    - job: sonarqube
       artifacts: true
   script:
     - python3 .ci/compliance-report.py
