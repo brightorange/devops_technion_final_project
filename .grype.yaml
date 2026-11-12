@@ -1,0 +1,21 @@
+# Grype policy. Runs alongside Trivy rather than instead of it: the two use
+# different vulnerability databases and genuinely catch different things.
+# Grype found a fixable CRITICAL in the Python interpreter (CVE-2026-115557)
+# that Trivy reported as clean, which is why the base image moved to 3.14.10.
+#
+# Every ignore below is a deliberate decision with a reason and a revisit
+# condition. Anything not listed fails the build.
+
+# Only fail on vulnerabilities that have a published fix. The base image
+# carries dozens with no upstream patch available; failing on those would make
+# the gate unsatisfiable, and an unsatisfiable gate gets switched off.
+only-fixed: true
+fail-on-severity: high
+
+ignore:
+  # Regression in how FIPS algorithms are enforced in hashlib. Affects only
+  # deployments running OpenSSL in FIPS mode, which this is not. Fixed in
+  # Python 3.14.11, but no 3.14.11 slim-trixie image has been published yet,
+  # so the fix is not actually obtainable. Remove this entry once that image
+  # exists and the base can move.
+  - vulnerability: CVE-2026-119170

@@ -1,5 +1,5 @@
 # ---- Stage 1: build — install dependencies into a virtualenv ----
-FROM python:3.14.8-slim-trixie AS builder
+FROM python:3.14.10-slim-trixie AS builder
 
 ENV PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
@@ -43,7 +43,7 @@ RUN find /opt/venv/lib -maxdepth 3 \
 
 
 # ---- Stage 4: runtime — only the virtualenv and app code ----
-FROM python:3.14.8-slim-trixie AS runtime
+FROM python:3.14.10-slim-trixie AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
