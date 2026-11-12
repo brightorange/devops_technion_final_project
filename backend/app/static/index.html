@@ -190,7 +190,8 @@
   .checkout:disabled{background:var(--line); color:var(--muted); cursor:not-allowed; filter:none}
 
   /* ---- toast ---- */
-  #toasts{display:block; position:fixed; left:50%; bottom:26px; transform:translateX(-50%);
+  /* <output> is inline by default, so the layout has to be set explicitly. */
+  #toasts{position:fixed; left:50%; bottom:26px; transform:translateX(-50%);
           z-index:60; display:flex; flex-direction:column; gap:8px; align-items:center;
           pointer-events:none; width:max-content; max-width:calc(100vw - 32px)}
   .toast{
