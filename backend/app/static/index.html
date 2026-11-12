@@ -149,18 +149,17 @@
   }
 
   /* ---- cart drawer ---- */
-  .scrim{
-    position:fixed; inset:0; z-index:40; background:rgba(16,16,14,.42);
-    backdrop-filter:blur(2px); opacity:0; pointer-events:none; transition:opacity .22s;
+  /* A native <dialog> rather than a div with role="dialog": focus trapping,
+     Escape handling and the backdrop all come for free and are correct. */
+  dialog{
+    position:fixed; inset:0 0 0 auto; z-index:50;
+    width:min(400px,100%); max-width:100%; height:100%; max-height:100%;
+    margin:0; padding:0; border:0; border-left:1px solid var(--line);
+    background:var(--surface); color:var(--fg);
+    flex-direction:column;
   }
-  .scrim.open{opacity:1; pointer-events:auto}
-  aside{
-    position:fixed; top:0; right:0; bottom:0; z-index:50; width:min(400px,100%);
-    background:var(--surface); border-left:1px solid var(--line);
-    display:flex; flex-direction:column;
-    transform:translateX(100%); transition:transform .26s cubic-bezier(.4,0,.2,1);
-  }
-  aside.open{transform:none}
+  dialog[open]{display:flex}
+  dialog::backdrop{background:rgba(16,16,14,.42); backdrop-filter:blur(2px)}
   .ahead{
     display:flex; align-items:center; gap:12px; padding:18px 20px;
     border-bottom:1px solid var(--line);
@@ -191,7 +190,7 @@
   .checkout:disabled{background:var(--line); color:var(--muted); cursor:not-allowed; filter:none}
 
   /* ---- toast ---- */
-  #toasts{position:fixed; left:50%; bottom:26px; transform:translateX(-50%);
+  #toasts{display:block; position:fixed; left:50%; bottom:26px; transform:translateX(-50%);
           z-index:60; display:flex; flex-direction:column; gap:8px; align-items:center;
           pointer-events:none; width:max-content; max-width:calc(100vw - 32px)}
   .toast{
@@ -265,8 +264,7 @@
   Metrics at <code>/metrics</code>, probes at <code>/health/live</code> and <code>/health/ready</code>.
 </footer>
 
-<div class="scrim" id="scrim"></div>
-<aside id="drawer" role="dialog" aria-modal="true" aria-label="Cart">
+<dialog id="drawer" aria-label="Cart">
   <div class="ahead">
     <h2>Your cart</h2>
     <button class="x" id="close-cart" aria-label="Close cart">&times;</button>
@@ -276,9 +274,9 @@
     <div class="sum"><span>Total</span><b id="total">0.00</b></div>
     <button class="checkout" id="checkout">Place order</button>
   </div>
-</aside>
+</dialog>
 
-<div id="toasts" role="status" aria-live="polite"></div>
+<output id="toasts" aria-live="polite"></output>
 
 <script>
 // Same origin as this page, so the client works unchanged on localhost,
@@ -288,6 +286,7 @@ const USER = 1;
 
 const $ = id => document.getElementById(id);
 const money = n => Number(n).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
+const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 // Products have no images, so each gets a stable colour derived from its name:
 // the same product always looks the same, without shipping any assets.
@@ -357,7 +356,7 @@ async function loadProducts() {
   const items = await call("/products");
   const grid = $("grid");
   grid.innerHTML = "";
-  $("pcount").textContent = items.length ? `${items.length} item${items.length > 1 ? "s" : ""}` : "";
+  $("pcount").textContent = items.length ? plural(items.length, "item") : "";
   if (!items.length) {
     grid.innerHTML = `<div class="blank" style="grid-column:1/-1">
       No products yet — add one below to get started.</div>`;
@@ -414,7 +413,7 @@ async function loadOrders() {
     row.className = "order";
     row.innerHTML = `
       <b>#${o.id}</b>
-      <span class="when">${units} item${units > 1 ? "s" : ""}</span>
+      <span class="when">${plural(units, "item")}</span>
       <span class="status">${o.status}</span>
       <b></b>`;
     row.lastElementChild.textContent = money(o.total);
@@ -448,16 +447,14 @@ function addToCart(id, btn) {
 const removeFromCart = id =>
   act(() => call(`/cart/${USER}/item/${id}`, {method: "DELETE"}));
 
-const openCart = open => {
-  $("drawer").classList.toggle("open", open);
-  $("scrim").classList.toggle("open", open);
-  if (open) $("close-cart").focus();
-};
+const drawer = $("drawer");
+const openCart = open => open ? drawer.showModal() : drawer.close();
 
 $("open-cart").onclick = () => openCart(true);
 $("close-cart").onclick = () => openCart(false);
-$("scrim").onclick = () => openCart(false);
-addEventListener("keydown", e => e.key === "Escape" && openCart(false));
+// Clicking the backdrop: the event target is the dialog itself only when the
+// click landed outside its content box.
+drawer.onclick = e => { if (e.target === drawer) drawer.close(); };
 
 $("checkout").onclick = () => act(async () => {
   const order = await call("/orders", {
