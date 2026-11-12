@@ -1,7 +1,7 @@
 def test_ui_is_served(client):
     response = client.get("/ui")
     assert response.status_code == 200
-    assert b"<title>Shop</title>" in response.data
+    assert b"Northwind Supply" in response.data
 
 
 def test_ui_is_not_at_root(client):
