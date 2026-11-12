@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shop</title>
+<style>
+  :root {
+    --bg: #fbfbfa; --fg: #1a1a18; --muted: #6b6b66;
+    --line: #e3e3df; --card: #fff; --accent: #2d6a4f; --danger: #9b2226;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #17171a; --fg: #ececea; --muted: #9a9a95;
+      --line: #2e2e33; --card: #1f1f23; --accent: #6abf96; --danger: #e5717a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px 16px; background: var(--bg); color: var(--fg);
+    font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  main { max-width: 900px; margin: 0 auto; }
+  header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 4px; }
+  h1 { font-size: 22px; margin: 0; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); font-size: 13px; margin-bottom: 24px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em;
+       color: var(--muted); margin: 28px 0 10px; font-weight: 600; }
+  section { background: var(--card); border: 1px solid var(--line);
+            border-radius: 10px; padding: 16px; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; font-size: 12px; text-transform: uppercase;
+       letter-spacing: 0.05em; color: var(--muted); font-weight: 600;
+       padding: 0 8px 8px 0; }
+  td { padding: 9px 8px 9px 0; border-top: 1px solid var(--line); }
+  td.num, th.num { text-align: right; padding-right: 0; }
+  form { display: flex; flex-wrap: wrap; gap: 8px; }
+  input {
+    flex: 1 1 110px; min-width: 0; padding: 8px 10px; font: inherit;
+    background: var(--bg); color: var(--fg);
+    border: 1px solid var(--line); border-radius: 7px;
+  }
+  input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  button {
+    padding: 8px 14px; font: inherit; font-weight: 500; cursor: pointer;
+    background: var(--accent); color: #fff; border: 0; border-radius: 7px;
+  }
+  button:hover { filter: brightness(1.08); }
+  button.ghost { background: transparent; color: var(--muted);
+                 border: 1px solid var(--line); padding: 5px 10px; font-size: 13px; }
+  button.ghost:hover { color: var(--fg); }
+  .empty { color: var(--muted); font-size: 14px; padding: 6px 0; }
+  .total { display: flex; justify-content: space-between; align-items: center;
+           margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
+  .total strong { font-size: 17px; }
+  #msg { margin: 16px 0 0; padding: 10px 12px; border-radius: 7px; font-size: 14px;
+         border: 1px solid var(--line); display: none; }
+  #msg.show { display: block; }
+  #msg.err { color: var(--danger); border-color: var(--danger); }
+  footer { color: var(--muted); font-size: 12px; margin-top: 32px; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+</style>
+</head>
+<body>
+<main>
+  <header><h1>Shop</h1></header>
+  <p class="sub">Demo client for the Flask API. User <code>1</code>.</p>
+
+  <h2>Catalogue</h2>
+  <section>
+    <table>
+      <thead><tr>
+        <th>Product</th><th class="num">Price</th><th class="num">Stock</th><th></th>
+      </tr></thead>
+      <tbody id="products"></tbody>
+    </table>
+    <div class="total" style="border-top:0;padding-top:4px;margin-top:10px">
+      <form id="new-product" style="width:100%">
+        <input name="name" placeholder="Name" required>
+        <input name="price" type="number" step="0.01" min="0.01" placeholder="Price" required>
+        <input name="stock" type="number" min="0" value="10" placeholder="Stock">
+        <button>Add product</button>
+      </form>
+    </div>
+  </section>
+
+  <h2>Cart</h2>
+  <section>
+    <table>
+      <thead><tr>
+        <th>Product</th><th class="num">Qty</th><th class="num">Line total</th><th></th>
+      </tr></thead>
+      <tbody id="cart"></tbody>
+    </table>
+    <div class="total">
+      <strong id="cart-total">0.00</strong>
+      <button id="checkout">Place order</button>
+    </div>
+  </section>
+
+  <h2>Orders</h2>
+  <section><div id="orders"></div></section>
+
+  <p id="msg"></p>
+  <footer>Served by the same Flask app as the API.</footer>
+</main>
+
+<script>
+// Same origin as this page, so the UI works unchanged on localhost, through a
+// port-forward, and behind the ingress.
+const API = "/api";
+const USER = 1;
+const money = n => Number(n).toFixed(2);
+const el = document.getElementById.bind(document);
+
+function say(text, isError) {
+  const m = el("msg");
+  m.textContent = text;
+  m.className = "show" + (isError ? " err" : "");
+  clearTimeout(say.t);
+  say.t = setTimeout(() => (m.className = ""), 4000);
+}
+
+async function call(path, options) {
+  const res = await fetch(API + path, options);
+  const body = res.status === 204 ? null : await res.json().catch(() => null);
+  if (!res.ok) {
+    // The API returns {message} for errors and {errors:{field:...}} for
+    // validation failures; surface whichever is present.
+    const detail = body && (body.message || Object.entries(body.errors || {})
+      .map(([f, m]) => `${f} ${m}`).join(", "));
+    throw new Error(detail || `request failed (${res.status})`);
+  }
+  return body;
+}
+
+function render(tbody, rows, colspan, emptyText) {
+  tbody.innerHTML = "";
+  if (!rows.length) {
+    tbody.innerHTML = `<tr><td colspan="${colspan}" class="empty">${emptyText}</td></tr>`;
+  }
+  return rows;
+}
+
+async function loadProducts() {
+  const items = await call("/products");
+  const tbody = el("products");
+  render(tbody, items, 4, "No products yet.");
+  for (const p of items) {
+    const tr = tbody.insertRow();
+    tr.insertCell().textContent = p.name;
+    tr.insertCell().outerHTML = `<td class="num">${money(p.price)}</td>`;
+    tr.insertCell().outerHTML = `<td class="num">${p.stock}</td>`;
+    const cell = tr.insertCell();
+    cell.className = "num";
+    const b = document.createElement("button");
+    b.className = "ghost";
+    b.textContent = "Add to cart";
+    b.disabled = p.stock === 0;
+    b.onclick = () => add(p.id);
+    cell.appendChild(b);
+  }
+}
+
+async function loadCart() {
+  const cart = await call(`/cart/${USER}`);
+  const tbody = el("cart");
+  render(tbody, cart.items, 4, "Cart is empty.");
+  for (const i of cart.items) {
+    const tr = tbody.insertRow();
+    tr.insertCell().textContent = i.name;
+    tr.insertCell().outerHTML = `<td class="num">${i.quantity}</td>`;
+    tr.insertCell().outerHTML = `<td class="num">${money(i.unit_price * i.quantity)}</td>`;
+    const cell = tr.insertCell();
+    cell.className = "num";
+    const b = document.createElement("button");
+    b.className = "ghost";
+    b.textContent = "Remove";
+    b.onclick = () => remove(i.product_id);
+    cell.appendChild(b);
+  }
+  el("cart-total").textContent = money(cart.total);
+  el("checkout").disabled = cart.items.length === 0;
+}
+
+async function loadOrders() {
+  const box = el("orders");
+  const found = await call(`/orders?user_id=${USER}`);
+  box.innerHTML = found.length
+    ? found.map(o =>
+        `<div style="padding:7px 0;border-top:1px solid var(--line)">
+           #${o.id} &middot; ${o.items.length} item${o.items.length > 1 ? "s" : ""}
+           &middot; <strong>${money(o.total)}</strong>
+           <span style="color:var(--muted)"> ${o.status}</span>
+         </div>`).join("")
+    : `<div class="empty">No orders yet.</div>`;
+}
+
+const refresh = () => Promise.all([loadProducts(), loadCart(), loadOrders()]);
+
+async function guard(fn, ok) {
+  try { await fn(); await refresh(); if (ok) say(ok); }
+  catch (e) { say(e.message, true); }
+}
+
+const add = id => guard(() => call("/cart", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ user_id: USER, product_id: id, quantity: 1 }),
+}), "Added to cart");
+
+const remove = id => guard(() => call(`/cart/${USER}/item/${id}`, { method: "DELETE" }));
+
+el("checkout").onclick = () => guard(async () => {
+  const o = await call("/orders", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ user_id: USER }),
+  });
+  say(`Order #${o.id} placed, ${money(o.total)}`);
+}, null);
+
+el("new-product").onsubmit = e => {
+  e.preventDefault();
+  const f = new FormData(e.target);
+  guard(async () => {
+    await call("/products", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: f.get("name"),
+        price: Number(f.get("price")),
+        stock: Number(f.get("stock") || 0),
+      }),
+    });
+    e.target.reset();
+  }, "Product added");
+};
+
+refresh().catch(e => say(e.message, true));
+</script>
+</body>
+</html>

@@ -1,4 +1,4 @@
-from flask import Flask
+from flask import Flask, send_from_directory
 from flask_restful import Api
 
 from .config import Config
@@ -32,5 +32,12 @@ def create_app(config_class=Config):
     api.add_resource(UserCartItem, "/api/cart/<int:user_id>/item/<int:product_id>")
     api.add_resource(OrderList, "/api/orders")
     api.add_resource(OrderDetail, "/api/orders/<int:order_id>")
+
+    # Served under /ui rather than / so the ingress can route it explicitly.
+    # A "/" prefix rule would match every path, including /health/*, and undo
+    # the deliberate decision to keep the probes unreachable from outside.
+    @app.get("/ui")
+    def ui():
+        return send_from_directory(app.static_folder, "index.html")
 
     return app
