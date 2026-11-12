@@ -8,9 +8,10 @@
 stages:
   - lint
   - test
-  - scan          # secrets — before anything is built
+  - scan          # secrets and SAST — before anything is built
   - build
-  - image-scan    # CVEs — needs the built image to exist
+  - image-scan    # SBOM and CVEs — need the built image to exist
+  - report        # collect every finding into one durable artifact
   - publish
 
 variables:
@@ -115,9 +116,72 @@ docker-build:
 trivy:
   stage: image-scan
   script:
+    - mkdir -p reports
+    - |
+      trivy image --scanners vuln --severity HIGH,CRITICAL \
+        --ignore-unfixed --no-progress --format json \
+        --output reports/trivy.json "$IMAGE:$CI_COMMIT_SHORT_SHA"
     - |
       trivy image --scanners vuln --severity HIGH,CRITICAL \
         --ignore-unfixed --exit-code 1 --no-progress "$IMAGE:$CI_COMMIT_SHORT_SHA"
+  artifacts:
+    when: always
+    paths:
+      - reports/trivy.json
+    expire_in: 90 days
+
+# ---- Software Bill of Materials ----
+# An inventory of everything inside the image: OS packages, Python libraries,
+# versions and licences. Without one, "are we affected by this CVE?" means
+# rebuilding old images and guessing. With one it is a query against an
+# artifact that was recorded at build time.
+#
+# Two formats because consumers differ: CycloneDX is what scanners read, SPDX
+# is what licence and procurement tooling expects.
+sbom:
+  stage: image-scan
+  script:
+    - mkdir -p reports
+    # Package-level only. The default also catalogues every file in the image,
+    # which here is 2700 entries of noise around 112 real packages.
+    - |
+      syft scan "docker:$IMAGE:$CI_COMMIT_SHORT_SHA" \
+        --select-catalogers "-file" \
+        -o "cyclonedx-json=reports/sbom.cdx.json" \
+        -o "spdx-json=reports/sbom.spdx.json" \
+        -q
+    - |
+      syft scan "docker:$IMAGE:$CI_COMMIT_SHORT_SHA" \
+        --select-catalogers "-file" -o table -q | tee reports/sbom.txt | head -20
+  artifacts:
+    paths:
+      - reports/sbom.cdx.json
+      - reports/sbom.spdx.json
+      - reports/sbom.txt
+    # Longer than the default: the point of an SBOM is answering questions
+    # months after the build.
+    expire_in: 1 year
+
+# ---- Security gate 3: vulnerabilities, second opinion ----
+# Grype scans the SBOM rather than the image, and uses a different
+# vulnerability database from Trivy. That is the point: on the first run it
+# found a fixable CRITICAL in the Python interpreter that Trivy reported clean,
+# which is why the base image moved from 3.14.8 to 3.14.10.
+#
+# Policy and justified ignores live in .grype.yaml.
+grype:
+  stage: image-scan
+  needs:
+    - job: sbom
+      artifacts: true
+  script:
+    - grype "sbom:reports/sbom.cdx.json" -o json --file reports/grype.json -q
+    - grype "sbom:reports/sbom.cdx.json" -q
+  artifacts:
+    when: always
+    paths:
+      - reports/grype.json
+    expire_in: 90 days
 
 # Minikube keeps its own image store, so a locally built image has to be
 # side-loaded before the cluster can run it. Replaced by a registry push once
@@ -129,3 +193,29 @@ minikube-load:
   script:
     - docker tag "$IMAGE:$CI_COMMIT_SHORT_SHA" "$IMAGE:dev"
     - minikube image load "$IMAGE:dev"
+
+# ---- Automated compliance reporting ----
+# Job logs age out, and a log is not evidence. This produces one durable
+# artifact per build recording what was scanned, by what, with what result,
+# and what is inside the image — the thing to hand over when someone asks
+# months later whether a given release was checked.
+compliance-report:
+  stage: report
+  needs:
+    - job: trivy
+      artifacts: true
+    - job: grype
+      artifacts: true
+    - job: sbom
+      artifacts: true
+  script:
+    - python3 .ci/compliance-report.py
+  artifacts:
+    when: always
+    paths:
+      - reports/compliance.md
+      - reports/sbom.cdx.json
+      - reports/sbom.spdx.json
+      - reports/trivy.json
+      - reports/grype.json
+    expire_in: 1 year
